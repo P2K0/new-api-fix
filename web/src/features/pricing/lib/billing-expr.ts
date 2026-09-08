@@ -258,12 +258,14 @@ export type TierCondition = {
   value: number
 }
 
+export type ParsedTierCondition = TierCondition | RequestCondition
+
 export type ParsedTier = {
   billingUnit?: 'token' | 'request'
   fixedPrice?: number
   conditionText?: string
   label: string
-  conditions: TierCondition[]
+  conditions: ParsedTierCondition[]
   [field: string]: unknown
 }
 
@@ -306,10 +308,27 @@ function mapTokenTier(
 export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
   if (!exprStr) return []
   const compiled = compileBillingExpression(exprStr)
-  if (compiled.status !== 'ready') return []
-  const canonical = readTokenTierChain(compiled.ast)
-  if (canonical) return canonical.map(mapTokenTier)
-  return readTimeTokenPricing(exprStr)?.tiers.map(mapTokenTier) ?? []
+  if (compiled.status === 'ready') {
+    const canonical = readTokenTierChain(compiled.ast)
+    if (canonical) return canonical.map(mapTokenTier)
+    const timePricing = readTimeTokenPricing(exprStr)
+    if (!timePricing) return []
+    return timePricing.tiers.map((tier) => {
+      const timeConditionText = tier.conditionText?.match(
+        /^\((.*?)\)(?:\s+&&|$)/
+      )?.[1]
+      const timeConditions = timeConditionText
+        ? tryParseRequestConditions(timeConditionText)
+        : null
+      return {
+        ...mapTokenTier(tier),
+        ...(timeConditions
+          ? { conditions: timeConditions, conditionText: undefined }
+          : {}),
+      }
+    })
+  }
+  return []
 }
 
 /** Current-time selection is exclusively for summaries; detail and log callers retain all rows. */

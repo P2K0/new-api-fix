@@ -39,11 +39,11 @@ import {
   splitBillingExprAndRequestRules,
   tryParseRequestRuleExpr,
   type ParsedTaskTier,
+  type ParsedTierCondition,
   type ParsedTier,
   type RequestCondition,
   type RequestRuleGroup,
   type RequestRuleTrace,
-  type TierCondition,
 } from '../lib/billing-expr'
 import { formatBillingCondition } from '../lib/billing-expression/condition-display'
 import { compileBillingExpression } from '../lib/billing-expression/parser'
@@ -154,11 +154,12 @@ function formatTokenHint(value: string | number): string {
 }
 
 function formatConditionSummary(
-  conditions: TierCondition[],
+  conditions: ParsedTierCondition[],
   t: (key: string) => string
 ): string {
   return conditions
     .map((c) => {
+      if ('source' in c) return describeCondition(c, t)
       const varLabel = t(VAR_LABELS[c.var] || c.var)
       const hint = formatTokenHint(c.value)
       return `${varLabel} ${OP_LABELS[c.op] || c.op} ${hint || c.value}`
@@ -229,6 +230,11 @@ function describeCondition(
     const fn = t(TIME_FUNC_LABELS[cond.timeFunc] || cond.timeFunc)
     const tz = cond.timezone || 'UTC'
     if (cond.mode === MATCH_RANGE) {
+      if (cond.timeFunc === 'hour') {
+        const start = String(Number(cond.rangeStart)).padStart(2, '0')
+        const end = String(Number(cond.rangeEnd)).padStart(2, '0')
+        return `${start}:00 ~ ${end}:00 (${tz})`
+      }
       return `${fn} ${cond.rangeStart}:00~${cond.rangeEnd}:00 (${tz})`
     }
     const opMap: Record<string, string> = {
@@ -259,6 +265,12 @@ function describeGroup(
   t: (key: string) => string,
   locale: string
 ): string {
+  if (group.conditions?.every((condition) => condition.source === SOURCE_TIME)) {
+    const description = group.conditions
+      .map((condition) => describeCondition(condition, t))
+      .join(' && ')
+    if (description) return description
+  }
   if (group.conditionText) {
     const formatted = formatBillingCondition(group.conditionText, t, locale)
     if (formatted) return formatted
